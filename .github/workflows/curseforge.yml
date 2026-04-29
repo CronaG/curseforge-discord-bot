@@ -1,0 +1,69 @@
+name: CurseForge Update Checker
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"  # toutes les 10 minutes
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Get latest CurseForge file
+        id: cf
+        run: |
+          RESPONSE=$(curl -s \
+            -H "x-api-key: ${{ secrets.CURSEFORGE_API_KEY }}" \
+            "https://api.curseforge.com/v1/mods/MOD_ID/files")
+
+          echo "$RESPONSE" > data.json
+
+          LATEST_ID=$(jq '.data[0].id' data.json)
+          FILE_NAME=$(jq -r '.data[0].fileName' data.json)
+          URL=$(jq -r '.data[0].downloadUrl' data.json)
+
+          echo "latest_id=$LATEST_ID" >> $GITHUB_OUTPUT
+          echo "file_name=$FILE_NAME" >> $GITHUB_OUTPUT
+          echo "url=$URL" >> $GITHUB_OUTPUT
+
+      - name: Read previous version
+        id: old
+        run: |
+          echo "old_id=$(cat last_version.txt)" >> $GITHUB_OUTPUT
+
+      - name: Compare versions
+        id: check
+        run: |
+          if [ "${{ steps.cf.outputs.latest_id }}" != "${{ steps.old.outputs.old_id }}" ]; then
+            echo "update=true" >> $GITHUB_OUTPUT
+          else
+            echo "update=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Send Discord message
+        if: steps.check.outputs.update == 'true'
+        run: |
+          curl -H "Content-Type: application/json" \
+          -X POST \
+          -d "{
+            \"content\": \"🚀 Nouvelle version du modpack !\\n**${{ steps.cf.outputs.file_name }}**\\n🔗 ${{ steps.cf.outputs.url }}\"
+          }" \
+          ${{ secrets.DISCORD_WEBHOOK }}
+
+      - name: Save new version
+        if: steps.check.outputs.update == 'true'
+        run: |
+          echo "${{ steps.cf.outputs.latest_id }}" > last_version.txt
+
+      - name: Commit update
+        if: steps.check.outputs.update == 'true'
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add last_version.txt
+          git commit -m "Update version"
+          git push
