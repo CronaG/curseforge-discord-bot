@@ -1,8 +1,9 @@
 name: CurseForge Update Checker
 
 env:
+  ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  
+
 on:
   schedule:
     - cron: "*/10 * * * *"  # toutes les 10 minutes
