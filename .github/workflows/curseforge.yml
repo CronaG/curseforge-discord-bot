@@ -53,7 +53,7 @@ jobs:
           curl -H "Content-Type: application/json" \
           -X POST \
           -d "{
-            \"content\": \"🚀 Nouvelle version du modpack !\\n**${{ steps.cf.outputs.file_name }}**\\n🔗 ${{ steps.cf.outputs.url }}\"
+            \"content\": \"@everyone\\n🚀 Nouvelle version du modpack !\\n**${{ steps.cf.outputs.file_name }}**\\n🔗 ${{ steps.cf.outputs.url }}\"
           }" \
           ${{ secrets.DISCORD_WEBHOOK }}
 
