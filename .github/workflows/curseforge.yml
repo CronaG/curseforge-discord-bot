@@ -21,7 +21,7 @@ jobs:
         run: |
           RESPONSE=$(curl -s \
             -H "x-api-key: ${{ secrets.CURSEFORGE_API_KEY }}" \
-            "https://api.curseforge.com/v1/mods/MOD_ID/files")
+            "https://api.curseforge.com/v1/mods/911562/files")
 
           echo "$RESPONSE" > data.json
 
