@@ -16,8 +16,8 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      # 🔎 Fetch CurseForge public page
-      - name: Get latest modpack version (scraping safe)
+      # 🔎 Fetch CurseForge page
+      - name: Get latest modpack version
         id: cf
         run: |
           set -e
@@ -28,19 +28,30 @@ jobs:
 
           echo "$HTML" > page.html
 
-          # 🔥 Extract latest file ID (safe, no PCRE)
+          # 🔥 Extract latest file ID (stable pattern)
           FILE_ID=$(echo "$HTML" | grep -oE '/files/[0-9]+' | head -n 1 | grep -oE '[0-9]+')
 
           if [ -z "$FILE_ID" ]; then
-            echo "❌ ERROR: Impossible de récupérer FILE_ID"
+            echo "❌ ERROR: FILE_ID introuvable"
             exit 1
           fi
 
-          # 🔥 Try to extract version name (fallback safe)
-          VERSION_NAME=$(echo "$HTML" | grep -oE 'data-name="[^"]+"' | head -n 1 | cut -d'"' -f2)
+          # 🔥 VERSION NAME FIX (multi fallback)
+          VERSION_NAME=$(echo "$HTML" | grep -oE '"fileName":"[^"]+"' | head -n 1 | cut -d'"' -f4)
 
+          # fallback 1
           if [ -z "$VERSION_NAME" ]; then
-            VERSION_NAME="unknown-version"
+            VERSION_NAME=$(echo "$HTML" | grep -oE 'data-name="[^"]+"' | head -n 1 | cut -d'"' -f2)
+          fi
+
+          # fallback 2 (title page)
+          if [ -z "$VERSION_NAME" ]; then
+            VERSION_NAME=$(echo "$HTML" | grep -oE '<h1[^>]*>[^<]+' | head -n 1 | sed 's/<[^>]*>//g')
+          fi
+
+          # fallback final
+          if [ -z "$VERSION_NAME" ]; then
+            VERSION_NAME="version-$FILE_ID"
           fi
 
           FILE_URL="https://www.curseforge.com/minecraft/modpacks/apocalyptic-survival-server/files/$FILE_ID"
@@ -61,7 +72,7 @@ jobs:
 
           echo "old_id=$OLD_ID" >> $GITHUB_OUTPUT
 
-      # 🧠 Debug (safe)
+      # 🧠 Debug
       - name: Debug values
         run: |
           echo "Latest ID: ${{ steps.cf.outputs.latest_id }}"
@@ -78,14 +89,14 @@ jobs:
             echo "update=false" >> $GITHUB_OUTPUT
           fi
 
-      # 🔔 Discord webhook
+      # 🔔 Discord message
       - name: Send Discord message
         if: steps.check.outputs.update == 'true'
         run: |
           curl -H "Content-Type: application/json" \
           -X POST \
           -d "{
-            \"content\": \"@everyone\\n🚀 **Nouvelle version du modpack !**\\n📦 Version : ${{ steps.cf.outputs.version_name }}\\n📁 ID : ${{ steps.cf.outputs.latest_id }}\\n🔗 ${{ steps.cf.outputs.url }}\"
+            \"content\": \"🚀 **Nouvelle version du modpack !**\\n📦 Version : ${{ steps.cf.outputs.version_name }}\\n📁 ID : ${{ steps.cf.outputs.latest_id }}\\n🔗 ${{ steps.cf.outputs.url }}\"
           }" \
           ${{ secrets.DISCORD_WEBHOOK }}
 
