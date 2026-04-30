@@ -26,17 +26,35 @@ jobs:
 
           echo "$RESPONSE" > data.json
 
-          LATEST_ID=$(jq '.data[0].id' data.json)
+          echo "==== DEBUG API RESPONSE ===="
+          cat data.json
+
+          COUNT=$(jq '.data | length' data.json)
+
+          if [ "$COUNT" -eq 0 ]; then
+            echo "❌ ERROR: Aucun fichier trouvé sur CurseForge"
+            exit 1
+          fi
+
+          LATEST_ID=$(jq -r '.data[0].id' data.json)
+          VERSION_NAME=$(jq -r '.data[0].displayName // "unknown-version"' data.json)
           FILE_NAME=$(jq -r '.data[0].fileName // "unknown-file"' data.json)
 
-          # 🔥 lien fiable (remplace downloadUrl)
+          # 🔗 lien fiable vers la version
           URL="https://www.curseforge.com/minecraft/modpacks/apocalyptic-survival-server/files/$LATEST_ID"
 
+          # sécurité
+          if [ -z "$LATEST_ID" ] || [ "$LATEST_ID" = "null" ]; then
+            echo "❌ ERROR: latest_id invalide"
+            exit 1
+          fi
+
           echo "latest_id=$LATEST_ID" >> $GITHUB_OUTPUT
+          echo "version_name=$VERSION_NAME" >> $GITHUB_OUTPUT
           echo "file_name=$FILE_NAME" >> $GITHUB_OUTPUT
           echo "url=$URL" >> $GITHUB_OUTPUT
 
-      # 📂 Lecture version précédente (safe)
+      # 📂 Lecture version précédente
       - name: Read previous version
         id: old
         run: |
@@ -47,11 +65,12 @@ jobs:
           fi
           echo "old_id=$OLD_ID" >> $GITHUB_OUTPUT
 
-      # 🧠 Debug (super utile)
+      # 🧠 Debug comparaison
       - name: Debug values
         run: |
           echo "Latest ID: ${{ steps.cf.outputs.latest_id }}"
           echo "Old ID: ${{ steps.old.outputs.old_id }}"
+          echo "Version: ${{ steps.cf.outputs.version_name }}"
           echo "File: ${{ steps.cf.outputs.file_name }}"
           echo "URL: ${{ steps.cf.outputs.url }}"
 
@@ -65,29 +84,35 @@ jobs:
             echo "update=false" >> $GITHUB_OUTPUT
           fi
 
-      # 🔔 Discord
+      # 🔔 Discord message
       - name: Send Discord message
         if: steps.check.outputs.update == 'true'
         run: |
           curl -H "Content-Type: application/json" \
           -X POST \
           -d "{
-            \"content\": \"@everyone\\n🚀 Nouvelle version du modpack !\\n📦 ${{ steps.cf.outputs.file_name }}\\n🔗 ${{ steps.cf.outputs.url }}\"
+            \"content\": \"@everyone\\n🚀 **Nouvelle version du modpack !**\\n📦 Version : ${{ steps.cf.outputs.version_name }}\\n📁 Fichier : ${{ steps.cf.outputs.file_name }}\\n🔗 ${{ steps.cf.outputs.url }}\"
           }" \
           ${{ secrets.DISCORD_WEBHOOK }}
 
-      # 💾 Sauvegarde version
+      # 💾 Save version
       - name: Save new version
         if: steps.check.outputs.update == 'true'
         run: |
+          if [ -z "${{ steps.cf.outputs.latest_id }}" ]; then
+            echo "❌ ERROR: latest_id vide"
+            exit 1
+          fi
+
           echo "${{ steps.cf.outputs.latest_id }}" > last_version.txt
 
-      # 📤 Commit fix
+      # 📤 Commit update
       - name: Commit update
         if: steps.check.outputs.update == 'true'
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
+
           git add last_version.txt
-          git commit -m "Update version"
+          git commit -m "Update version" || echo "No changes to commit"
           git push
