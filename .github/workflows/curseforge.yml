@@ -22,45 +22,47 @@ jobs:
         run: |
           RESPONSE=$(curl -s \
             -H "x-api-key: ${{ secrets.CURSEFORGE_API_KEY }}" \
-            "https://api.curseforge.com/v1/mods/911562/files")
+            "https://api.curseforge.com/v1/mods/911562/files?pageSize=1")
 
           echo "$RESPONSE" > data.json
 
           echo "==== RAW API RESPONSE ===="
           cat data.json
 
-          # 🔥 Vérifie que jq peut lire le JSON
+          # 🔥 Vérifie JSON valide
           if ! jq empty data.json 2>/dev/null; then
-            echo "❌ ERROR: JSON invalide ou réponse API cassée"
+            echo "❌ ERROR: JSON invalide"
             exit 1
           fi
 
-          # 🔥 Vérifie que data existe
-          HAS_DATA=$(jq 'has("data")' data.json)
-          if [ "$HAS_DATA" != "true" ]; then
-            echo "❌ ERROR: champ 'data' absent (API erreur)"
+          # 🔥 Vérifie présence data
+          if [ "$(jq 'has("data")' data.json)" != "true" ]; then
+            echo "❌ ERROR: API CurseForge invalide ou modId incorrect"
             cat data.json
             exit 1
           fi
 
           # 🔥 Vérifie contenu
           COUNT=$(jq '.data | length' data.json)
+
           if [ "$COUNT" -eq 0 ]; then
             echo "❌ ERROR: Aucun fichier trouvé"
             exit 1
           fi
 
-          # 📦 Extraction SAFE
+          # 📦 Extraction sécurisée
           LATEST_ID=$(jq -r '.data[0].id // empty' data.json)
           VERSION_NAME=$(jq -r '.data[0].displayName // "unknown-version"' data.json)
           FILE_NAME=$(jq -r '.data[0].fileName // "unknown-file"' data.json)
 
-          if [ -z "$LATEST_ID" ]; then
+          # 🔥 sécurité ultime
+          if [ -z "$LATEST_ID" ] || [ "$LATEST_ID" = "null" ]; then
             echo "❌ ERROR: latest_id vide"
             cat data.json
             exit 1
           fi
 
+          # 🔗 lien propre CurseForge
           URL="https://www.curseforge.com/minecraft/modpacks/apocalyptic-survival-server/files/$LATEST_ID"
 
           echo "latest_id=$LATEST_ID" >> $GITHUB_OUTPUT
@@ -88,7 +90,7 @@ jobs:
           echo "File: ${{ steps.cf.outputs.file_name }}"
           echo "URL: ${{ steps.cf.outputs.url }}"
 
-      # 🔍 Compare
+      # 🔍 Compare versions
       - name: Compare versions
         id: check
         run: |
@@ -98,7 +100,7 @@ jobs:
             echo "update=false" >> $GITHUB_OUTPUT
           fi
 
-      # 🔔 Discord
+      # 🔔 Discord message
       - name: Send Discord message
         if: steps.check.outputs.update == 'true'
         run: |
@@ -115,7 +117,7 @@ jobs:
         run: |
           echo "${{ steps.cf.outputs.latest_id }}" > last_version.txt
 
-      # 📤 Commit
+      # 📤 Commit update
       - name: Commit update
         if: steps.check.outputs.update == 'true'
         run: |
