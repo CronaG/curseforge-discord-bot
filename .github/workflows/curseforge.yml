@@ -1,4 +1,4 @@
-name: CurseForge Auto Update Checker
+name: CurseForge Update Checker (NO API)
 
 permissions:
   contents: write
@@ -16,98 +16,33 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      # 🔎 STEP 1 - FIND MODPACK AUTOMATICALLY (FIXED)
-      - name: Find Modpack ID automatically
-        id: search
-        run: |
-          QUERY="apocalyptic survival server"
-
-          # 🔥 URL encode proprement
-          ENCODED_QUERY=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$QUERY'''))")
-
-          SEARCH=$(curl -s \
-            -H "x-api-key: ${{ secrets.CURSEFORGE_API_KEY }}" \
-            "https://api.curseforge.com/v1/mods/search?gameId=432&searchFilter=$ENCODED_QUERY")
-
-          echo "$SEARCH" > search.json
-
-          echo "==== SEARCH RESULT ===="
-          cat search.json
-
-          # 🔥 validation JSON
-          if ! jq empty search.json 2>/dev/null; then
-            echo "❌ ERROR: JSON invalide CurseForge"
-            exit 1
-          fi
-
-          # 🔥 vérifie structure API
-          HAS_DATA=$(jq 'has("data")' search.json)
-          if [ "$HAS_DATA" != "true" ]; then
-            echo "❌ ERROR: API CurseForge invalide"
-            cat search.json
-            exit 1
-          fi
-
-          COUNT=$(jq '.data | length' search.json)
-          if [ "$COUNT" -eq 0 ]; then
-            echo "❌ ERROR: Aucun modpack trouvé"
-            exit 1
-          fi
-
-          MOD_ID=$(jq -r '.data[0].id // empty' search.json)
-          MOD_NAME=$(jq -r '.data[0].name // "unknown-modpack"' search.json)
-
-          if [ -z "$MOD_ID" ] || [ "$MOD_ID" = "null" ]; then
-            echo "❌ ERROR: Mod ID invalide"
-            exit 1
-          fi
-
-          echo "mod_id=$MOD_ID" >> $GITHUB_OUTPUT
-          echo "mod_name=$MOD_NAME" >> $GITHUB_OUTPUT
-
-      # 📦 STEP 2 - GET LATEST FILE
-      - name: Get latest version
+      # 🔎 Get latest version from public page
+      - name: Fetch CurseForge page
         id: cf
         run: |
-          MOD_ID=${{ steps.search.outputs.mod_id }}
+          URL="https://www.curseforge.com/minecraft/modpacks/apocalyptic-survival-server/files"
 
-          RESPONSE=$(curl -s \
-            -H "x-api-key: ${{ secrets.CURSEFORGE_API_KEY }}" \
-            "https://api.curseforge.com/v1/mods/$MOD_ID/files?pageSize=1")
+          HTML=$(curl -s "$URL")
 
-          echo "$RESPONSE" > data.json
+          echo "$HTML" > page.html
 
-          echo "==== FILES RESPONSE ===="
-          cat data.json
+          # 🔥 extraction simple (latest file ID)
+          FILE_ID=$(echo "$HTML" | grep -oE "/files/[0-9]+" | head -n 1 | grep -oE "[0-9]+")
 
-          if ! jq empty data.json 2>/dev/null; then
-            echo "❌ JSON invalide"
+          if [ -z "$FILE_ID" ]; then
+            echo "❌ Impossible de trouver version"
             exit 1
           fi
 
-          COUNT=$(jq '.data | length' data.json)
-          if [ "$COUNT" -eq 0 ]; then
-            echo "❌ Aucun fichier trouvé"
-            exit 1
-          fi
+          VERSION_NAME=$(echo "$HTML" | grep -oP '(?<=data-name=")[^"]+' | head -n 1)
 
-          LATEST_ID=$(jq -r '.data[0].id' data.json)
-          VERSION_NAME=$(jq -r '.data[0].displayName // "unknown-version"' data.json)
-          FILE_NAME=$(jq -r '.data[0].fileName // "unknown-file"' data.json)
+          FILE_URL="https://www.curseforge.com/minecraft/modpacks/apocalyptic-survival-server/files/$FILE_ID"
 
-          if [ -z "$LATEST_ID" ] || [ "$LATEST_ID" = "null" ]; then
-            echo "❌ latest_id vide"
-            exit 1
-          fi
-
-          URL="https://www.curseforge.com/minecraft/modpacks/apocalyptic-survival-server/files/$LATEST_ID"
-
-          echo "latest_id=$LATEST_ID" >> $GITHUB_OUTPUT
+          echo "latest_id=$FILE_ID" >> $GITHUB_OUTPUT
           echo "version_name=$VERSION_NAME" >> $GITHUB_OUTPUT
-          echo "file_name=$FILE_NAME" >> $GITHUB_OUTPUT
-          echo "url=$URL" >> $GITHUB_OUTPUT
+          echo "url=$FILE_URL" >> $GITHUB_OUTPUT
 
-      # 📂 STEP 3 - PREVIOUS VERSION
+      # 📂 Read last version
       - name: Read previous version
         id: old
         run: |
@@ -116,17 +51,10 @@ jobs:
           else
             OLD_ID=0
           fi
+
           echo "old_id=$OLD_ID" >> $GITHUB_OUTPUT
 
-      # 🧠 DEBUG
-      - name: Debug values
-        run: |
-          echo "Mod ID: ${{ steps.search.outputs.mod_id }}"
-          echo "Latest ID: ${{ steps.cf.outputs.latest_id }}"
-          echo "Old ID: ${{ steps.old.outputs.old_id }}"
-          echo "Version: ${{ steps.cf.outputs.version_name }}"
-
-      # 🔍 COMPARE
+      # 🔍 Compare
       - name: Compare versions
         id: check
         run: |
@@ -136,24 +64,24 @@ jobs:
             echo "update=false" >> $GITHUB_OUTPUT
           fi
 
-      # 🔔 DISCORD
+      # 🔔 Discord
       - name: Send Discord message
         if: steps.check.outputs.update == 'true'
         run: |
           curl -H "Content-Type: application/json" \
           -X POST \
           -d "{
-            \"content\": \"@everyone\\n🚀 **Nouvelle version du modpack !**\\n📦 Version : ${{ steps.cf.outputs.version_name }}\\n📁 Fichier : ${{ steps.cf.outputs.file_name }}\\n🔗 ${{ steps.cf.outputs.url }}\"
+            \"content\": \"🚀 **Nouvelle version du modpack !**\\n📦 Version ID : ${{ steps.cf.outputs.latest_id }}\\n📌 ${{ steps.cf.outputs.url }}\"
           }" \
           ${{ secrets.DISCORD_WEBHOOK }}
 
-      # 💾 SAVE VERSION
+      # 💾 Save version
       - name: Save version
         if: steps.check.outputs.update == 'true'
         run: |
           echo "${{ steps.cf.outputs.latest_id }}" > last_version.txt
 
-      # 📤 COMMIT
+      # 📤 Commit
       - name: Commit update
         if: steps.check.outputs.update == 'true'
         run: |
@@ -161,5 +89,5 @@ jobs:
           git config user.email "github-actions@github.com"
 
           git add last_version.txt
-          git commit -m "Update version" || echo "No changes"
+          git commit -m "Update version"
           git push
