@@ -16,7 +16,7 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      # 🔍 Récupération CurseForge
+      # 🔍 CurseForge API
       - name: Get latest CurseForge file
         id: cf
         run: |
@@ -26,35 +26,49 @@ jobs:
 
           echo "$RESPONSE" > data.json
 
-          echo "==== DEBUG API RESPONSE ===="
+          echo "==== RAW API RESPONSE ===="
           cat data.json
 
-          COUNT=$(jq '.data | length' data.json)
-
-          if [ "$COUNT" -eq 0 ]; then
-            echo "❌ ERROR: Aucun fichier trouvé sur CurseForge"
+          # 🔥 Vérifie que jq peut lire le JSON
+          if ! jq empty data.json 2>/dev/null; then
+            echo "❌ ERROR: JSON invalide ou réponse API cassée"
             exit 1
           fi
 
-          LATEST_ID=$(jq -r '.data[0].id' data.json)
+          # 🔥 Vérifie que data existe
+          HAS_DATA=$(jq 'has("data")' data.json)
+          if [ "$HAS_DATA" != "true" ]; then
+            echo "❌ ERROR: champ 'data' absent (API erreur)"
+            cat data.json
+            exit 1
+          fi
+
+          # 🔥 Vérifie contenu
+          COUNT=$(jq '.data | length' data.json)
+          if [ "$COUNT" -eq 0 ]; then
+            echo "❌ ERROR: Aucun fichier trouvé"
+            exit 1
+          fi
+
+          # 📦 Extraction SAFE
+          LATEST_ID=$(jq -r '.data[0].id // empty' data.json)
           VERSION_NAME=$(jq -r '.data[0].displayName // "unknown-version"' data.json)
           FILE_NAME=$(jq -r '.data[0].fileName // "unknown-file"' data.json)
 
-          # 🔗 lien fiable vers la version
-          URL="https://www.curseforge.com/minecraft/modpacks/apocalyptic-survival-server/files/$LATEST_ID"
-
-          # sécurité
-          if [ -z "$LATEST_ID" ] || [ "$LATEST_ID" = "null" ]; then
-            echo "❌ ERROR: latest_id invalide"
+          if [ -z "$LATEST_ID" ]; then
+            echo "❌ ERROR: latest_id vide"
+            cat data.json
             exit 1
           fi
+
+          URL="https://www.curseforge.com/minecraft/modpacks/apocalyptic-survival-server/files/$LATEST_ID"
 
           echo "latest_id=$LATEST_ID" >> $GITHUB_OUTPUT
           echo "version_name=$VERSION_NAME" >> $GITHUB_OUTPUT
           echo "file_name=$FILE_NAME" >> $GITHUB_OUTPUT
           echo "url=$URL" >> $GITHUB_OUTPUT
 
-      # 📂 Lecture version précédente
+      # 📂 Version précédente
       - name: Read previous version
         id: old
         run: |
@@ -65,7 +79,7 @@ jobs:
           fi
           echo "old_id=$OLD_ID" >> $GITHUB_OUTPUT
 
-      # 🧠 Debug comparaison
+      # 🧠 Debug
       - name: Debug values
         run: |
           echo "Latest ID: ${{ steps.cf.outputs.latest_id }}"
@@ -74,7 +88,7 @@ jobs:
           echo "File: ${{ steps.cf.outputs.file_name }}"
           echo "URL: ${{ steps.cf.outputs.url }}"
 
-      # 🔍 Comparaison
+      # 🔍 Compare
       - name: Compare versions
         id: check
         run: |
@@ -84,7 +98,7 @@ jobs:
             echo "update=false" >> $GITHUB_OUTPUT
           fi
 
-      # 🔔 Discord message
+      # 🔔 Discord
       - name: Send Discord message
         if: steps.check.outputs.update == 'true'
         run: |
@@ -99,14 +113,9 @@ jobs:
       - name: Save new version
         if: steps.check.outputs.update == 'true'
         run: |
-          if [ -z "${{ steps.cf.outputs.latest_id }}" ]; then
-            echo "❌ ERROR: latest_id vide"
-            exit 1
-          fi
-
           echo "${{ steps.cf.outputs.latest_id }}" > last_version.txt
 
-      # 📤 Commit update
+      # 📤 Commit
       - name: Commit update
         if: steps.check.outputs.update == 'true'
         run: |
@@ -114,5 +123,5 @@ jobs:
           git config user.email "github-actions@github.com"
 
           git add last_version.txt
-          git commit -m "Update version" || echo "No changes to commit"
+          git commit -m "Update version" || echo "No changes"
           git push
