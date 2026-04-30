@@ -16,25 +16,32 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      # 🔎 Get latest version from public page
-      - name: Fetch CurseForge page
+      # 🔎 Fetch CurseForge public page
+      - name: Get latest modpack version (scraping safe)
         id: cf
         run: |
+          set -e
+
           URL="https://www.curseforge.com/minecraft/modpacks/apocalyptic-survival-server/files"
 
-          HTML=$(curl -s "$URL")
+          HTML=$(curl -sL "$URL")
 
           echo "$HTML" > page.html
 
-          # 🔥 extraction simple (latest file ID)
-          FILE_ID=$(echo "$HTML" | grep -oE "/files/[0-9]+" | head -n 1 | grep -oE "[0-9]+")
+          # 🔥 Extract latest file ID (safe, no PCRE)
+          FILE_ID=$(echo "$HTML" | grep -oE '/files/[0-9]+' | head -n 1 | grep -oE '[0-9]+')
 
           if [ -z "$FILE_ID" ]; then
-            echo "❌ Impossible de trouver version"
+            echo "❌ ERROR: Impossible de récupérer FILE_ID"
             exit 1
           fi
 
-          VERSION_NAME=$(echo "$HTML" | grep -oP '(?<=data-name=")[^"]+' | head -n 1)
+          # 🔥 Try to extract version name (fallback safe)
+          VERSION_NAME=$(echo "$HTML" | grep -oE 'data-name="[^"]+"' | head -n 1 | cut -d'"' -f2)
+
+          if [ -z "$VERSION_NAME" ]; then
+            VERSION_NAME="unknown-version"
+          fi
 
           FILE_URL="https://www.curseforge.com/minecraft/modpacks/apocalyptic-survival-server/files/$FILE_ID"
 
@@ -42,7 +49,7 @@ jobs:
           echo "version_name=$VERSION_NAME" >> $GITHUB_OUTPUT
           echo "url=$FILE_URL" >> $GITHUB_OUTPUT
 
-      # 📂 Read last version
+      # 📂 Read previous version
       - name: Read previous version
         id: old
         run: |
@@ -54,7 +61,14 @@ jobs:
 
           echo "old_id=$OLD_ID" >> $GITHUB_OUTPUT
 
-      # 🔍 Compare
+      # 🧠 Debug (safe)
+      - name: Debug values
+        run: |
+          echo "Latest ID: ${{ steps.cf.outputs.latest_id }}"
+          echo "Old ID: ${{ steps.old.outputs.old_id }}"
+          echo "Version: ${{ steps.cf.outputs.version_name }}"
+
+      # 🔍 Compare versions
       - name: Compare versions
         id: check
         run: |
@@ -64,14 +78,14 @@ jobs:
             echo "update=false" >> $GITHUB_OUTPUT
           fi
 
-      # 🔔 Discord
+      # 🔔 Discord webhook
       - name: Send Discord message
         if: steps.check.outputs.update == 'true'
         run: |
           curl -H "Content-Type: application/json" \
           -X POST \
           -d "{
-            \"content\": \"🚀 **Nouvelle version du modpack !**\\n📦 Version ID : ${{ steps.cf.outputs.latest_id }}\\n📌 ${{ steps.cf.outputs.url }}\"
+            \"content\": \"@everyone\\n🚀 **Nouvelle version du modpack !**\\n📦 Version : ${{ steps.cf.outputs.version_name }}\\n📁 ID : ${{ steps.cf.outputs.latest_id }}\\n🔗 ${{ steps.cf.outputs.url }}\"
           }" \
           ${{ secrets.DISCORD_WEBHOOK }}
 
@@ -81,7 +95,7 @@ jobs:
         run: |
           echo "${{ steps.cf.outputs.latest_id }}" > last_version.txt
 
-      # 📤 Commit
+      # 📤 Commit update
       - name: Commit update
         if: steps.check.outputs.update == 'true'
         run: |
@@ -89,5 +103,5 @@ jobs:
           git config user.email "github-actions@github.com"
 
           git add last_version.txt
-          git commit -m "Update version"
+          git commit -m "Update modpack version" || echo "No changes"
           git push
