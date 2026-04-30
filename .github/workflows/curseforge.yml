@@ -16,6 +16,7 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
+      # 🔍 Récupération CurseForge
       - name: Get latest CurseForge file
         id: cf
         run: |
@@ -26,18 +27,35 @@ jobs:
           echo "$RESPONSE" > data.json
 
           LATEST_ID=$(jq '.data[0].id' data.json)
-          FILE_NAME=$(jq -r '.data[0].fileName' data.json)
-          URL=$(jq -r '.data[0].downloadUrl' data.json)
+          FILE_NAME=$(jq -r '.data[0].fileName // "unknown-file"' data.json)
+
+          # 🔥 lien fiable (remplace downloadUrl)
+          URL="https://www.curseforge.com/minecraft/modpacks/apocalyptic-survival-server/files/$LATEST_ID"
 
           echo "latest_id=$LATEST_ID" >> $GITHUB_OUTPUT
           echo "file_name=$FILE_NAME" >> $GITHUB_OUTPUT
           echo "url=$URL" >> $GITHUB_OUTPUT
 
+      # 📂 Lecture version précédente (safe)
       - name: Read previous version
         id: old
         run: |
-          echo "old_id=$(cat last_version.txt)" >> $GITHUB_OUTPUT
+          if [ -s last_version.txt ]; then
+            OLD_ID=$(cat last_version.txt)
+          else
+            OLD_ID=0
+          fi
+          echo "old_id=$OLD_ID" >> $GITHUB_OUTPUT
 
+      # 🧠 Debug (super utile)
+      - name: Debug values
+        run: |
+          echo "Latest ID: ${{ steps.cf.outputs.latest_id }}"
+          echo "Old ID: ${{ steps.old.outputs.old_id }}"
+          echo "File: ${{ steps.cf.outputs.file_name }}"
+          echo "URL: ${{ steps.cf.outputs.url }}"
+
+      # 🔍 Comparaison
       - name: Compare versions
         id: check
         run: |
@@ -47,21 +65,24 @@ jobs:
             echo "update=false" >> $GITHUB_OUTPUT
           fi
 
+      # 🔔 Discord
       - name: Send Discord message
         if: steps.check.outputs.update == 'true'
         run: |
           curl -H "Content-Type: application/json" \
           -X POST \
           -d "{
-            \"content\": \"@everyone\\n🚀 Nouvelle version du modpack !\\n**${{ steps.cf.outputs.file_name }}**\\n🔗 ${{ steps.cf.outputs.url }}\"
+            \"content\": \"@everyone\\n🚀 Nouvelle version du modpack !\\n📦 ${{ steps.cf.outputs.file_name }}\\n🔗 ${{ steps.cf.outputs.url }}\"
           }" \
           ${{ secrets.DISCORD_WEBHOOK }}
 
+      # 💾 Sauvegarde version
       - name: Save new version
         if: steps.check.outputs.update == 'true'
         run: |
           echo "${{ steps.cf.outputs.latest_id }}" > last_version.txt
 
+      # 📤 Commit fix
       - name: Commit update
         if: steps.check.outputs.update == 'true'
         run: |
