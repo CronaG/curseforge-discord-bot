@@ -22,7 +22,7 @@ jobs:
         run: |
           SEARCH=$(curl -s \
             -H "x-api-key: ${{ secrets.CURSEFORGE_API_KEY }}" \
-            "https://api.curseforge.com/v1/mods/search?gameId=432&searchFilter=apocalyptic")
+            "https://api.curseforge.com/v1/mods/search?gameId=432&searchFilter=apocalyptic survival server")
 
           echo "$SEARCH" > search.json
 
