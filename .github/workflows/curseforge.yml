@@ -16,19 +16,18 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      # 🔎 Fetch CurseForge page
-      - name: Get latest modpack version
+      # 🔎 Get latest file ID
+      - name: Get latest file ID
         id: cf
         run: |
           set -e
 
-          URL="https://www.curseforge.com/minecraft/modpacks/apocalyptic-survival-server/files"
+          BASE_URL="https://www.curseforge.com/minecraft/modpacks/apocalyptic-survival-server/files"
 
-          HTML=$(curl -sL "$URL")
+          HTML=$(curl -sL "$BASE_URL")
 
           echo "$HTML" > page.html
 
-          # 🔥 Extract latest file ID (stable pattern)
           FILE_ID=$(echo "$HTML" | grep -oE '/files/[0-9]+' | head -n 1 | grep -oE '[0-9]+')
 
           if [ -z "$FILE_ID" ]; then
@@ -36,29 +35,31 @@ jobs:
             exit 1
           fi
 
-          # 🔥 VERSION NAME FIX (multi fallback)
-          VERSION_NAME=$(echo "$HTML" | grep -oE '"fileName":"[^"]+"' | head -n 1 | cut -d'"' -f4)
+          echo "latest_id=$FILE_ID" >> $GITHUB_OUTPUT
 
-          # fallback 1
-          if [ -z "$VERSION_NAME" ]; then
-            VERSION_NAME=$(echo "$HTML" | grep -oE 'data-name="[^"]+"' | head -n 1 | cut -d'"' -f2)
-          fi
+      # 🔎 Get real version name from file page
+      - name: Get version name
+        id: version
+        run: |
+          FILE_ID=${{ steps.cf.outputs.latest_id }}
 
-          # fallback 2 (title page)
-          if [ -z "$VERSION_NAME" ]; then
-            VERSION_NAME=$(echo "$HTML" | grep -oE '<h1[^>]*>[^<]+' | head -n 1 | sed 's/<[^>]*>//g')
-          fi
+          FILE_PAGE="https://www.curseforge.com/minecraft/modpacks/apocalyptic-survival-server/files/$FILE_ID"
 
-          # fallback final
+          FILE_HTML=$(curl -sL "$FILE_PAGE")
+
+          echo "$FILE_HTML" > file_page.html
+
+          VERSION_NAME=$(echo "$FILE_HTML" | grep -oE '<title>[^<]+' | head -n 1 | sed 's/<title>//')
+
+          # 🔥 Nettoyage du titre
+          VERSION_NAME=$(echo "$VERSION_NAME" | sed 's/ - Minecraft Modpacks - CurseForge//')
+
           if [ -z "$VERSION_NAME" ]; then
             VERSION_NAME="version-$FILE_ID"
           fi
 
-          FILE_URL="https://www.curseforge.com/minecraft/modpacks/apocalyptic-survival-server/files/$FILE_ID"
-
-          echo "latest_id=$FILE_ID" >> $GITHUB_OUTPUT
           echo "version_name=$VERSION_NAME" >> $GITHUB_OUTPUT
-          echo "url=$FILE_URL" >> $GITHUB_OUTPUT
+          echo "url=$FILE_PAGE" >> $GITHUB_OUTPUT
 
       # 📂 Read previous version
       - name: Read previous version
@@ -77,9 +78,9 @@ jobs:
         run: |
           echo "Latest ID: ${{ steps.cf.outputs.latest_id }}"
           echo "Old ID: ${{ steps.old.outputs.old_id }}"
-          echo "Version: ${{ steps.cf.outputs.version_name }}"
+          echo "Version: ${{ steps.version.outputs.version_name }}"
 
-      # 🔍 Compare versions
+      # 🔍 Compare
       - name: Compare versions
         id: check
         run: |
@@ -89,14 +90,14 @@ jobs:
             echo "update=false" >> $GITHUB_OUTPUT
           fi
 
-      # 🔔 Discord message
+      # 🔔 Discord
       - name: Send Discord message
         if: steps.check.outputs.update == 'true'
         run: |
           curl -H "Content-Type: application/json" \
           -X POST \
           -d "{
-            \"content\": \"🚀 **Nouvelle version du modpack !**\\n📦 Version : ${{ steps.cf.outputs.version_name }}\\n📁 ID : ${{ steps.cf.outputs.latest_id }}\\n🔗 ${{ steps.cf.outputs.url }}\"
+            \"content\": \"🚀 **Nouvelle version du modpack !**\\n📦 Version : ${{ steps.version.outputs.version_name }}\\n🔗 ${{ steps.version.outputs.url }}\"
           }" \
           ${{ secrets.DISCORD_WEBHOOK }}
 
@@ -106,7 +107,7 @@ jobs:
         run: |
           echo "${{ steps.cf.outputs.latest_id }}" > last_version.txt
 
-      # 📤 Commit update
+      # 📤 Commit
       - name: Commit update
         if: steps.check.outputs.update == 'true'
         run: |
