@@ -26,8 +26,6 @@ jobs:
 
           HTML=$(curl -sL "$BASE_URL")
 
-          echo "$HTML" > page.html
-
           FILE_ID=$(echo "$HTML" | grep -oE '/files/[0-9]+' | head -n 1 | grep -oE '[0-9]+')
 
           if [ -z "$FILE_ID" ]; then
@@ -37,7 +35,7 @@ jobs:
 
           echo "latest_id=$FILE_ID" >> $GITHUB_OUTPUT
 
-      # 🔎 Get real version name from file page
+      # 🔎 Get version name
       - name: Get version name
         id: version
         run: |
@@ -47,13 +45,16 @@ jobs:
 
           FILE_HTML=$(curl -sL "$FILE_PAGE")
 
-          echo "$FILE_HTML" > file_page.html
-
+          # 🔥 Récupération du titre
           VERSION_NAME=$(echo "$FILE_HTML" | grep -oE '<title>[^<]+' | head -n 1 | sed 's/<title>//')
 
-          # 🔥 Nettoyage du titre
+          # 🔥 Nettoyage CurseForge
           VERSION_NAME=$(echo "$VERSION_NAME" | sed 's/ - Minecraft Modpacks - CurseForge//')
 
+          # 🔥 BONUS → supprime le nom du modpack
+          VERSION_NAME=$(echo "$VERSION_NAME" | sed 's/Apocalyptic Survival Server - //')
+
+          # fallback
           if [ -z "$VERSION_NAME" ]; then
             VERSION_NAME="version-$FILE_ID"
           fi
@@ -73,14 +74,7 @@ jobs:
 
           echo "old_id=$OLD_ID" >> $GITHUB_OUTPUT
 
-      # 🧠 Debug
-      - name: Debug values
-        run: |
-          echo "Latest ID: ${{ steps.cf.outputs.latest_id }}"
-          echo "Old ID: ${{ steps.old.outputs.old_id }}"
-          echo "Version: ${{ steps.version.outputs.version_name }}"
-
-      # 🔍 Compare
+      # 🔍 Compare versions
       - name: Compare versions
         id: check
         run: |
